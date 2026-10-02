@@ -15,9 +15,15 @@ question. Company systems are web apps reachable through the browser.
 
 Produce:
 - outcome: one sentence describing what "done" looks like for the requester.
-- success_criteria: concrete, checkable statements that must be true at the end, phrased so
-  that someone looking at the system of record could confirm each one.
-- steps: an ordered plan of high-level steps (not individual clicks). Always start by
+- success_criteria: concrete, checkable statements about the BUSINESS OUTCOME that must be
+  true at the end (which records exist or changed, with which values), phrased so someone
+  looking at the system of record could confirm each one. You have not seen the systems yet,
+  so do not invent features (attachments, emails, statuses) you don't know exist. Reporting
+  back to the requester happens through your final summary; it is not a criterion.
+  Example — request "Add Priya to the onboarding tracker, she starts Monday": good criteria
+  are "The onboarding tracker has exactly one entry for Priya" and "Priya's start date is
+  <that Monday's date>". Bad criteria: "A welcome email was sent", "Status is Complete".
+- steps: an ordered plan of 4-8 high-level steps (not individual clicks). Always start by
   reading whatever company policy or reference documents are relevant.
 - assumptions: anything you are assuming that the requester did not say.
 
@@ -47,6 +53,11 @@ HOW TO WORK
   (e.g. close a blocking dialog, re-read the page for fresh element refs, fix a field
   format, retry a transient server error once). Do not repeat the exact same failing action.
 - Element refs (e1, e2...) change after every page change. Use refs from the latest observation.
+- Lines starting "DATA CHANGE" in working memory are saves you have already made. Never
+  redo one that succeeded; open the resulting record to check it, then move on.
+- Don't re-read files you have already read; note what you need from them instead.
+- Fill a whole form with one browser_fill call, check the returned values, then submit.
+  Navigating away from a form discards what you typed.
 - Ask the requester (ask_human) only when you genuinely cannot proceed safely: missing
   information that policy says not to guess, or an ambiguous request. Don't ask for things
   you can find out yourself.
@@ -68,6 +79,9 @@ WORKER'S GOAL: {goal}
 WHAT THE WORKER HAS RECORDED SO FAR:
 {facts}
 
+DATA CHANGES THE WORKER HAS ALREADY MADE IN THIS RUN:
+{changes}
+
 PENDING ACTION: click "{button}" on {url}
 CURRENT FORM VALUES ON THE PAGE:
 {form}
@@ -78,8 +92,9 @@ PAGE TEXT (excerpt):
 Decide:
 - "allow" if policy permits this action without a human,
 - "needs_approval" if policy requires human approval for this action,
-- "block" if it clearly violates policy (e.g. creating a duplicate, deleting records, a value
-  that contradicts the source document).
+- "block" if it clearly violates policy (e.g. creating a duplicate — including re-submitting
+  something already saved in this run — deleting records, a value that contradicts the source
+  document, or required fields left empty).
 Give a one-sentence reason that cites the specific policy and the values involved."""
 
 REPLAN = """You are an autonomous AI worker. Your recent actions keep failing. Step back.

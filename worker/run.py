@@ -66,6 +66,7 @@ class RunContext:
     success_criteria: list[str] = field(default_factory=list)
     facts: list[str] = field(default_factory=list)
     approvals: list[dict] = field(default_factory=list)
+    changes: list[str] = field(default_factory=list)  # every data-changing action taken
     events: list[dict] = field(default_factory=list)
     listeners: list[Callable[[dict], None]] = field(default_factory=list)
     result: dict | None = None

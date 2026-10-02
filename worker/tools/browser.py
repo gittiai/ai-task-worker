@@ -19,7 +19,7 @@ from playwright.sync_api import sync_playwright
 from worker.config import settings
 
 ACTION_TIMEOUT_MS = 4000
-PAGE_TEXT_CHARS = 2500
+PAGE_TEXT_CHARS = 1500
 
 # Buttons whose label suggests they change data. Clicking one goes through the policy guard.
 COMMIT_WORDS = re.compile(r"\b(save|submit|create|update|delete|remove|pay|approve|send|confirm)\b",
@@ -110,7 +110,10 @@ class Browser:
             if e["in_dialog"]:
                 desc += " (in dialog)"
             lines.append(desc)
-        text = re.sub(r"\n{3,}", "\n\n", snap["text"]).strip()
+        # Drop text lines that just repeat element labels; they are listed above.
+        labels = {e["label"] for e in snap["elements"]}
+        text = "\n".join(ln for ln in snap["text"].splitlines()
+                         if ln.strip() and ln.strip() not in labels)
         if len(text) > PAGE_TEXT_CHARS:
             text = text[:PAGE_TEXT_CHARS] + " ...[page text truncated]"
         lines += ["Visible text:", text]
@@ -172,6 +175,28 @@ class Browser:
         except PlaywrightError:
             loc.select_option(value=option)
         return self.observe(f"select {option}")
+
+    def fill(self, fields: dict[str, str]) -> str:
+        filled, problems = [], []
+        for ref, value in fields.items():
+            try:
+                loc = self._locate(ref)
+                if self.elements[ref]["tag"] == "select":
+                    try:
+                        loc.select_option(label=str(value))
+                    except PlaywrightError:
+                        loc.select_option(value=str(value))
+                else:
+                    loc.fill(str(value))
+                filled.append(f"{self.elements[ref]['label'] or ref}={value}")
+            except (PlaywrightError, ValueError) as e:
+                problems.append(f"{ref}: {str(e).splitlines()[0]}")
+        if problems and not filled:
+            raise ValueError("Nothing was filled. " + "; ".join(problems))
+        head = f"Filled: {', '.join(filled)}"
+        if problems:
+            head += f"\nCould not fill: {'; '.join(problems)}"
+        return head + "\n" + self.observe("fill form")
 
     def form_state(self) -> str:
         """Current values of every form field, used by the policy guard."""

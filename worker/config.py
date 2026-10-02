@@ -12,9 +12,9 @@ load_dotenv(ROOT / ".env")
 
 @dataclass(frozen=True)
 class Settings:
-    xai_api_key: str = os.getenv("XAI_API_KEY", "")
-    model: str = os.getenv("XAI_MODEL", "grok-4")
-    company_app_url: str = os.getenv("COMPANY_APP_URL", "http://127.0.0.1:8000")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    company_app_url: str = os.getenv("COMPANY_APP_URL", "http://127.0.0.1:8765")
     headless: bool = os.getenv("HEADLESS", "1") == "1"
     # Folders the worker may read. Anything else is refused.
     workspace: Path = ROOT / "company_data"

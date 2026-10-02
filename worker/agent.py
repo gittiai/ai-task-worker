@@ -31,13 +31,13 @@ from pydantic import BaseModel, Field
 
 from worker import prompts
 from worker.config import settings
-from worker.llm import get_llm
+from worker.llm import get_llm, structured
 from worker.run import PlanStep, RunContext
 from worker.tools import files
 from worker.tools.browser import Browser
 
-KEEP_FULL_TOOL_OUTPUTS = 4  # older tool outputs are trimmed; facts live in working memory
-MAX_HISTORY = 40
+KEEP_FULL_TOOL_OUTPUTS = 2  # older tool outputs are trimmed; facts live in working memory
+MAX_HISTORY = 24
 
 
 # --- structured outputs ------------------------------------------------------------
@@ -131,6 +131,11 @@ class Worker:
             """Choose an option (by its visible text) in a <select> element."""
             return b.select(ref, option)
 
+        def browser_fill(fields: dict[str, str]) -> str:
+            """Fill several form fields in one action: {"e4": "value", "e5": "value"}.
+            Works for inputs, textareas and selects (by option text). Does not submit."""
+            return b.fill(fields)
+
         def note(fact: str) -> str:
             """Save a fact to working memory (extracted values, record IDs, decisions)."""
             run.facts.append(fact)
@@ -164,7 +169,7 @@ class Worker:
             return "Submitted for verification."
 
         fns = [list_files, read_file, browser_open, browser_read, browser_click, browser_type,
-               browser_select, note, update_plan, ask_human, finish]
+               browser_select, browser_fill, note, update_plan, ask_human, finish]
         return [StructuredTool.from_function(f) for f in fns]
 
     # ---- policy guard --------------------------------------------------------------
@@ -176,9 +181,10 @@ class Worker:
         button = self.browser.describe(ref).get("label", ref)
         form = self.browser.form_state()
         policies = files.read_file("policies.md")
-        decision: PolicyDecision = self.llm.with_structured_output(PolicyDecision).invoke(
+        decision: PolicyDecision = structured(self.llm, PolicyDecision).invoke(
             prompts.GUARD.format(
                 policies=policies, goal=self.run.goal, facts=self.run.facts_text(),
+                changes="\n".join(f"- {c}" for c in self.run.changes) or "(none yet)",
                 button=button, url=self.browser.page.url, form=form,
                 page=self.browser.page.inner_text("body")[:1500],
             )
@@ -211,7 +217,7 @@ class Worker:
 
     def plan_node(self, state: State) -> dict:
         self.run.emit("phase", phase="understand_and_plan")
-        plan: Plan = self.llm.with_structured_output(Plan).invoke(prompts.PLANNER.format(
+        plan: Plan = structured(self.llm, Plan).invoke(prompts.PLANNER.format(
             today=self.today, workspace=files.list_files("."), goal=self.run.goal))
         self.outcome = plan.outcome
         self.run.success_criteria = plan.success_criteria
@@ -239,15 +245,34 @@ class Worker:
         old = set(tool_idx[:-KEEP_FULL_TOOL_OUTPUTS])
         out = []
         for i, m in enumerate(msgs):
-            if i in old and len(m.content) > 300:
-                m = ToolMessage(content=m.content[:300] + " ...[trimmed]",
+            if i in old and len(m.content) > 200:
+                m = ToolMessage(content=m.content[:200] + " ...[trimmed]",
                                 tool_call_id=m.tool_call_id, name=m.name)
             out.append(m)
         return out
 
+    def _invoke_tools_llm(self, llm, messages: list[BaseMessage], tool_names: list[str]):
+        """Invoke a tool-calling model. If the provider rejects a malformed or invented tool
+        call, show the model its mistake and let it try again instead of crashing the run."""
+        for _ in range(3):
+            try:
+                return llm.invoke(messages)
+            except Exception as e:
+                if "tool_use_failed" not in str(e) and "Tool call validation" not in str(e):
+                    raise
+                msg = str(e).split("'failed_generation'")[0][-400:]
+                self.run.emit("observation", tool="(model)", ok=False,
+                              result=f"Invalid tool call rejected: {msg}")
+                messages = [*messages, HumanMessage(
+                    f"Your last tool call was rejected: {msg}\nOnly these tools exist: "
+                    f"{', '.join(tool_names)}. Call one of them with valid arguments.")]
+        return llm.invoke(messages)
+
     def act_node(self, state: State) -> dict:
         llm = self.llm.bind_tools(self.actor_tools)
-        reply: AIMessage = llm.invoke([self._system_prompt(), *self._compact(state["messages"])])
+        reply: AIMessage = self._invoke_tools_llm(
+            llm, [self._system_prompt(), *self._compact(state["messages"])],
+            [t.name for t in self.actor_tools])
         if reply.content:
             self.run.emit("thought", text=str(reply.content)[:2000])
         updates: dict = {"messages": [reply], "steps": state["steps"] + 1}
@@ -274,8 +299,14 @@ class Worker:
                                                                              "note"}:
                     raise RuntimeError("You have made this exact call 3 times in a row. It is "
                                        "not working; try a different approach.")
-                refusal = self._guard(args.get("ref", "")) if name == "browser_click" else None
+                commit = None
+                if name == "browser_click" and self.browser.is_commit(args.get("ref", "")):
+                    commit = (self.browser.describe(args["ref"]).get("label"),
+                              self.browser.form_state().replace("\n", "; "))
+                refusal = self._guard(args.get("ref", "")) if commit else None
                 result = refusal or tools[name].invoke(args)
+                if commit and not refusal:
+                    self._record_change(*commit)
                 if name == "finish":
                     phase, claim = "verifying", args.get("summary", "")
             except Exception as e:  # every failure becomes an observation the agent can use
@@ -287,6 +318,18 @@ class Worker:
             out.append(ToolMessage(content=str(result), tool_call_id=call["id"], name=name))
         return {"messages": out, "consecutive_failures": consecutive,
                 "recent_failures": failures, "phase": phase, "claim": claim}
+
+    def _record_change(self, button: str, form: str) -> None:
+        """Every data-changing action is remembered automatically, so neither the worker nor
+        the policy guard depends on the model having taken notes."""
+        page = self.browser.page
+        alert = page.query_selector("[role=alert]")
+        outcome = (f"page showed errors: {alert.inner_text()[:200]!r}" if alert
+                   else f"now at {page.url} ({page.title()})")
+        change = f"Clicked \"{button}\" with [{form}] -> {outcome}"
+        self.run.changes.append(change)
+        self.run.facts.append(f"DATA CHANGE: {change}")
+        self.run.emit("memory", fact=f"DATA CHANGE: {change}")
 
     def _explain(self, e: Exception) -> str:
         msg = str(e).split("\nCall log")[0].strip()
@@ -300,7 +343,7 @@ class Worker:
 
     def replan_node(self, state: State) -> dict:
         self.run.emit("phase", phase="replan")
-        r: Replan = self.llm.with_structured_output(Replan).invoke(prompts.REPLAN.format(
+        r: Replan = structured(self.llm, Replan).invoke(prompts.REPLAN.format(
             goal=self.run.goal, plan=self.run.plan_text(), facts=self.run.facts_text(),
             failures="\n".join(state["recent_failures"][-5:])))
         done = [s for s in self.run.plan if s.status == "done"]
@@ -320,7 +363,7 @@ class Worker:
             criteria="\n".join(f"- {c}" for c in self.run.success_criteria),
             facts=self.run.facts_text(), claim=state["claim"]))]
         for _ in range(15):
-            reply = llm.invoke(msgs)
+            reply = self._invoke_tools_llm(llm, msgs, list(tools))
             msgs.append(reply)
             if not reply.tool_calls:
                 break
@@ -335,7 +378,7 @@ class Worker:
                 except Exception as e:
                     result = f"ERROR: {self._explain(e)}"
                 msgs.append(ToolMessage(content=str(result), tool_call_id=call["id"]))
-        verdict: Verdict = self.llm.with_structured_output(Verdict).invoke(
+        verdict: Verdict = structured(self.llm, Verdict).invoke(
             [*self._compact(msgs), HumanMessage(prompts.VERIFIER_JUDGE)])
         self.run.emit("verdict", attempt=attempt, **verdict.model_dump())
         if verdict.passed:

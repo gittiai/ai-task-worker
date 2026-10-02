@@ -19,15 +19,15 @@ screenshots).
 
 ## Quick start
 
-Needs Python 3.12+, [uv](https://docs.astral.sh/uv/) and an [xAI API key](https://console.x.ai).
+Needs Python 3.12+, [uv](https://docs.astral.sh/uv/) and a [Groq API key](https://console.groq.com) (free tier works).
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env            # then put your XAI_API_KEY in .env
+cp .env.example .env            # then put your GROQ_API_KEY in .env
 
 # Terminal 1: the demo company's internal system (add CHAOS_MODE=1 to test recovery)
-uv run uvicorn company_app.main:app --port 8000
+uv run uvicorn company_app.main:app --port 8765
 
 # Terminal 2: the control-room UI
 uv run streamlit run ui/app.py
@@ -144,7 +144,7 @@ None of the agent's behaviour is mocked.
 
 | | |
 |---|---|
-| LLM | **Grok** (xAI API) via `langchain-xai`; model set by `XAI_MODEL` (default `grok-4`) |
+| LLM | **GPT-OSS-120B** (open weights) served by **Groq** via `langchain-groq`; set by `GROQ_MODEL` |
 | Agent loop | **LangGraph** (state machine) + `langchain-core` (tool schemas, structured output) |
 | Computer use | **Playwright** (Chromium) |
 | Documents | **pdfplumber** (extraction), **reportlab** (generating the sample invoices) |
