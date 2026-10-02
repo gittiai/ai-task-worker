@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ inv.invoice_number }} — Acme Ops{% endblock %}
+{% block content %}
+{% if created %}<div class="ok" role="status">Invoice saved.</div>{% endif %}
+<h2>Invoice {{ inv.invoice_number }}</h2>
+<table>
+  <tr><th>Record ID</th><td>{{ inv.id }}</td></tr>
+  <tr><th>Vendor</th><td>{{ inv.vendor }}</td></tr>
+  <tr><th>Amount</th><td>{{ inv.currency }} {{ '%.2f'|format(inv.amount) }}</td></tr>
+  <tr><th>Due date</th><td>{{ inv.due_date }}</td></tr>
+  <tr><th>Status</th><td><span class="tag {{ inv.status }}">{{ inv.status }}</span></td></tr>
+  <tr><th>Notes</th><td>{{ inv.notes }}</td></tr>
+  <tr><th>Recorded by</th><td>{{ inv.created_by }} at {{ inv.created_at }}</td></tr>
+</table>
+<form method="post" action="/invoices/{{ inv.id }}/status">
+  <label for="{{ rid('newstatus') }}">Change status</label>
+  <select id="{{ rid('newstatus') }}" name="status">
+    {% for s in ['open','flagged','paid'] %}<option value="{{ s }}" {% if inv.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <button type="submit">Update status</button>
+</form>
+{% endblock %}

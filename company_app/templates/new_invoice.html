@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}New invoice — Acme Ops{% endblock %}
+{% block content %}
+<h2>Record a vendor invoice</h2>
+{% if errors %}<div class="errors" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+<form method="post" action="/invoices/new">
+  <label for="{{ rid('vendor') }}">Vendor</label>
+  <select id="{{ rid('vendor') }}" name="vendor">
+    <option value="">— select —</option>
+    {% for v in vendors %}<option value="{{ v }}" {% if form.vendor==v %}selected{% endif %}>{{ v }}</option>{% endfor %}
+  </select>
+  <label for="{{ rid('inv') }}">Invoice number</label>
+  <input id="{{ rid('inv') }}" name="invoice_number" value="{{ form.invoice_number or '' }}">
+  <label for="{{ rid('amount') }}">Amount</label>
+  <input id="{{ rid('amount') }}" name="amount" value="{{ form.amount or '' }}">
+  <label for="{{ rid('currency') }}">Currency</label>
+  <select id="{{ rid('currency') }}" name="currency">
+    {% for c in ['INR','USD','EUR'] %}<option {% if form.currency==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <label for="{{ rid('due') }}">Due date (YYYY-MM-DD)</label>
+  <input id="{{ rid('due') }}" name="due_date" value="{{ form.due_date or '' }}">
+  <label for="{{ rid('notes') }}">Notes</label>
+  <textarea id="{{ rid('notes') }}" name="notes">{{ form.notes or '' }}</textarea>
+  <button type="submit" id="{{ rid('save') }}">{{ submit_label }}</button>
+</form>
+{% endblock %}

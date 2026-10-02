@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign in — Acme Ops{% endblock %}
+{% block content %}
+<h2>Sign in</h2>
+{% if error %}<div class="errors">{{ error }}</div>{% endif %}
+<form method="post" action="/login">
+  <label for="{{ rid('email') }}">Work email</label>
+  <input id="{{ rid('email') }}" name="email" type="email">
+  <label for="{{ rid('password') }}">Password</label>
+  <input id="{{ rid('password') }}" name="password" type="password">
+  <button type="submit">Sign in</button>
+</form>
+{% endblock %}
