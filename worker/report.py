@@ -13,6 +13,10 @@ def write_report(run: RunContext) -> None:
              "## Summary", r.get("summary") or r.get("error", ""), "", "## Plan"]
     lines += [f"- [{s.status}] {s.description}" + (f" — {s.note}" if s.note else "")
               for s in run.plan]
+    if run.items:
+        lines += ["", "## Work items"] + [
+            f"- **{v['status']}** {k}" + (f" — {v['note']}" if v["note"] else "")
+            for k, v in run.items.items()]
     v = r.get("verification")
     if v:
         lines += ["", f"## Independent verification (attempt {v['attempt']})"]

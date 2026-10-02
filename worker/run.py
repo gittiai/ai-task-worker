@@ -67,6 +67,8 @@ class RunContext:
     facts: list[str] = field(default_factory=list)
     approvals: list[dict] = field(default_factory=list)
     changes: list[str] = field(default_factory=list)  # every data-changing action taken
+    documents: dict[str, str] = field(default_factory=dict)  # files read, path -> text
+    items: dict[str, dict] = field(default_factory=dict)  # work list for multi-item tasks
     events: list[dict] = field(default_factory=list)
     listeners: list[Callable[[dict], None]] = field(default_factory=list)
     result: dict | None = None
@@ -102,6 +104,12 @@ class RunContext:
             f"{i}. [{s.status}] {s.description}" + (f" — {s.note}" if s.note else "")
             for i, s in enumerate(self.plan)
         )
+
+    def items_text(self) -> str:
+        if not self.items:
+            return "(no tracked items)"
+        return "\n".join(f"- [{v['status']}] {k}" + (f" — {v['note']}" if v["note"] else "")
+                         for k, v in self.items.items())
 
     def facts_text(self) -> str:
         return "\n".join(f"- {f}" for f in self.facts) or "(nothing recorded yet)"

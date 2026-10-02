@@ -109,7 +109,9 @@ class Worker:
 
         def read_file(path: str) -> str:
             """Read a workspace file: markdown, text, or PDF (text is extracted)."""
-            return files.read_file(path)
+            text = files.read_file(path)
+            run.documents[path.removeprefix("company_data/")] = text
+            return text
 
         def browser_open(url: str) -> str:
             """Open a URL (absolute, or a path like /invoices on the company app)."""
@@ -163,13 +165,38 @@ class Worker:
             run.emit("human_answer", answer=answer)
             return f"Requester answered: {answer or '(no answer)'}"
 
+        def track_items(items: list[str]) -> str:
+            """For tasks with several items (files, records, people...), register every item
+            up front, e.g. one per inbox file. Each must later be closed with resolve_item."""
+            for it in items:
+                run.items.setdefault(it, {"status": "open", "note": ""})
+            run.emit("items", items=run.items)
+            return run.items_text()
+
+        def resolve_item(item: str, status: str, note: str) -> str:
+            """Close a tracked item. status: done | already_exists | skipped | needs_human.
+            note must give evidence: the record ID created, the ID of the existing record that
+            matches (same vendor AND number), or why it was skipped."""
+            if item not in run.items:
+                raise ValueError(f"{item!r} is not tracked. Tracked: {list(run.items)}")
+            if status not in {"done", "already_exists", "skipped", "needs_human"}:
+                raise ValueError("status must be done, already_exists, skipped or needs_human.")
+            run.items[item] = {"status": status, "note": note}
+            run.emit("items", items=run.items)
+            return run.items_text()
+
         def finish(summary: str) -> str:
             """Call when all work is handled. Summarise what was done, with record IDs,
             and anything not done and why. This triggers independent verification."""
+            still_open = [k for k, v in run.items.items() if v["status"] == "open"]
+            if still_open:
+                raise RuntimeError(f"Cannot finish: {len(still_open)} tracked items are still "
+                                   f"open: {still_open}. Handle or resolve each one first.")
             return "Submitted for verification."
 
         fns = [list_files, read_file, browser_open, browser_read, browser_click, browser_type,
-               browser_select, browser_fill, note, update_plan, ask_human, finish]
+               browser_select, browser_fill, note, update_plan, track_items, resolve_item,
+               ask_human, finish]
         return [StructuredTool.from_function(f) for f in fns]
 
     # ---- policy guard --------------------------------------------------------------
@@ -185,6 +212,7 @@ class Worker:
             prompts.GUARD.format(
                 policies=policies, goal=self.run.goal, facts=self.run.facts_text(),
                 changes="\n".join(f"- {c}" for c in self.run.changes) or "(none yet)",
+                documents=self._documents_for_guard(),
                 button=button, url=self.browser.page.url, form=form,
                 page=self.browser.page.inner_text("body")[:1500],
             )
@@ -231,7 +259,8 @@ class Worker:
         return SystemMessage(prompts.ACTOR.format(
             today=self.today, goal=self.run.goal, outcome=self.outcome,
             criteria="\n".join(f"- {c}" for c in self.run.success_criteria),
-            plan=self.run.plan_text(), facts=self.run.facts_text()))
+            plan=self.run.plan_text(), facts=self.run.facts_text(),
+            items=self.run.items_text()))
 
     @staticmethod
     def _compact(messages: list[BaseMessage]) -> list[BaseMessage]:
@@ -245,7 +274,7 @@ class Worker:
         old = set(tool_idx[:-KEEP_FULL_TOOL_OUTPUTS])
         out = []
         for i, m in enumerate(msgs):
-            if i in old and len(m.content) > 200:
+            if i in old and len(m.content) > 200 and m.name != "read_file":
                 m = ToolMessage(content=m.content[:200] + " ...[trimmed]",
                                 tool_call_id=m.tool_call_id, name=m.name)
             out.append(m)
@@ -319,6 +348,11 @@ class Worker:
         return {"messages": out, "consecutive_failures": consecutive,
                 "recent_failures": failures, "phase": phase, "claim": claim}
 
+    def _documents_for_guard(self) -> str:
+        """Source documents read in this run (policies excluded; the guard gets those anyway)."""
+        docs = [(p, t) for p, t in self.run.documents.items() if "polic" not in p]
+        return "\n\n".join(f"--- {p} ---\n{t[:1500]}" for p, t in docs[-8:]) or "(none)"
+
     def _record_change(self, button: str, form: str) -> None:
         """Every data-changing action is remembered automatically, so neither the worker nor
         the policy guard depends on the model having taken notes."""
@@ -361,7 +395,8 @@ class Worker:
         msgs: list[BaseMessage] = [HumanMessage(prompts.VERIFIER.format(
             today=self.today, goal=self.run.goal,
             criteria="\n".join(f"- {c}" for c in self.run.success_criteria),
-            facts=self.run.facts_text(), claim=state["claim"]))]
+            facts=self.run.facts_text(),
+            claim=f"{state['claim']}\n\nPer-item report:\n{self.run.items_text()}"))]
         for _ in range(15):
             reply = self._invoke_tools_llm(llm, msgs, list(tools))
             msgs.append(reply)

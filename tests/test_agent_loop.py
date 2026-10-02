@@ -119,3 +119,20 @@ def test_non_commit_clicks_skip_the_guard(monkeypatch, tmp_path):
     run, w = make(monkeypatch, tmp_path, [])
     w.browser.elements = {"e1": {"tag": "a", "type": "", "label": "New invoice"}}
     assert w._guard("e1") is None
+
+
+def test_finish_refused_while_items_open(monkeypatch, tmp_path):
+    run, w = make(monkeypatch, tmp_path, [
+        PLAN,
+        call("track_items", items=["a.pdf", "b.pdf"]),
+        call("resolve_item", item="a.pdf", status="done", note="record 4"),
+        call("finish", summary="done"),          # refused: b.pdf still open
+        call("resolve_item", item="b.pdf", status="skipped", note="no due date; asked"),
+        call("finish", summary="done"),
+        AIMessage(content="checked"), PASS,
+    ])
+    result = w.run_task()
+    refused = [e for e in run.events if e["type"] == "observation" and e["tool"] == "finish"
+               and not e["ok"]]
+    assert refused and "b.pdf" in refused[0]["result"]
+    assert result["status"] == "completed"

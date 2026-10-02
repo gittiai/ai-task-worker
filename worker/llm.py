@@ -1,21 +1,32 @@
-"""The model: an open-weights model served by Groq. Swap it with GROQ_MODEL in .env."""
+"""Model providers. Pick one with LLM_PROVIDER and LLM_MODEL in .env; nothing else changes."""
 
-from langchain_groq import ChatGroq
 from pydantic import BaseModel
 
 from worker.config import settings
 
 
 def get_llm():
-    if not settings.groq_api_key:
-        raise RuntimeError("GROQ_API_KEY is not set. Copy .env.example to .env and add your key.")
-    return ChatGroq(model=settings.model, api_key=settings.groq_api_key, temperature=0,
-                    max_retries=3, timeout=120)
+    if settings.provider == "groq":
+        from langchain_groq import ChatGroq
+
+        if not settings.groq_api_key:
+            raise RuntimeError("GROQ_API_KEY is not set in .env.")
+        return ChatGroq(model=settings.model, api_key=settings.groq_api_key, temperature=0,
+                        max_retries=3, timeout=120)
+    if settings.provider == "openai_compatible":
+        from langchain_openai import ChatOpenAI
+
+        if not (settings.openai_api_key and settings.openai_base_url):
+            raise RuntimeError("Set OPENAI_COMPAT_API_KEY and OPENAI_COMPAT_BASE_URL in .env.")
+        return ChatOpenAI(model=settings.model, api_key=settings.openai_api_key,
+                          base_url=settings.openai_base_url, temperature=0, max_retries=3,
+                          timeout=120)
+    raise RuntimeError(f"Unknown LLM_PROVIDER {settings.provider!r}.")
 
 
 class Structured:
     """Structured output that tolerates provider quirks: try JSON-schema mode first, then
-    fall back to tool-calling mode, then retry once with the validation error shown."""
+    fall back to tool-calling mode."""
 
     def __init__(self, llm, schema: type[BaseModel]):
         self.schema = schema
@@ -35,7 +46,9 @@ class Structured:
 
 
 def structured(llm, schema: type[BaseModel]):
+    from langchain_core.language_models import BaseChatModel
+
     # The scripted test model has no real structured-output modes.
-    if not isinstance(llm, ChatGroq):
+    if not isinstance(llm, BaseChatModel):
         return llm.with_structured_output(schema)
     return Structured(llm, schema)

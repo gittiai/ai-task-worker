@@ -41,6 +41,9 @@ SUCCESS CRITERIA:
 PLAN (keep it current with update_plan; you may add, skip or change steps as you learn):
 {plan}
 
+WORK LIST (tracked items; finish is refused while any is open):
+{items}
+
 WORKING MEMORY (facts you recorded with `note`; older tool output may have been trimmed,
 so record anything you will need later — extracted values, record IDs, decisions):
 {facts}
@@ -53,6 +56,14 @@ HOW TO WORK
   (e.g. close a blocking dialog, re-read the page for fresh element refs, fix a field
   format, retry a transient server error once). Do not repeat the exact same failing action.
 - Element refs (e1, e2...) change after every page change. Use refs from the latest observation.
+- Never type a value you cannot see in a document you read or in working memory. If unsure,
+  re-read the source document.
+- For tasks with several items, first call track_items with every item (e.g. each file).
+  Finish one item completely (read it, check whether it
+  already exists, enter it, confirm the saved record, note the record ID) before starting
+  the next, then resolve_item it. An item "already exists" only if a record has the SAME
+  vendor AND the SAME invoice/reference number; a similar record is not a match.
+  Records that existed before you started are not your work; never claim them.
 - Lines starting "DATA CHANGE" in working memory are saves you have already made. Never
   redo one that succeeded; open the resulting record to check it, then move on.
 - Don't re-read files you have already read; note what you need from them instead.
@@ -82,6 +93,9 @@ WHAT THE WORKER HAS RECORDED SO FAR:
 DATA CHANGES THE WORKER HAS ALREADY MADE IN THIS RUN:
 {changes}
 
+SOURCE DOCUMENTS THE WORKER HAS READ (compare the form values against these):
+{documents}
+
 PENDING ACTION: click "{button}" on {url}
 CURRENT FORM VALUES ON THE PAGE:
 {form}
@@ -92,7 +106,9 @@ PAGE TEXT (excerpt):
 Decide:
 - "allow" if policy permits this action without a human,
 - "needs_approval" if policy requires human approval for this action,
-- "block" if it clearly violates policy (e.g. creating a duplicate — including re-submitting
+- "block" if a form value does not match the source document it came from (wrong amount,
+  e.g. a subtotal instead of the total payable; wrong date; wrong number), or if it clearly
+  violates policy (e.g. creating a duplicate — including re-submitting
   something already saved in this run — deleting records, a value that contradicts the source
   document, or required fields left empty).
 Give a one-sentence reason that cites the specific policy and the values involved."""
