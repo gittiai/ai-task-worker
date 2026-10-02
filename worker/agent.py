@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import operator
+import re
 from datetime import date
 from typing import Annotated, Literal, TypedDict
 
@@ -210,9 +211,10 @@ class Worker:
         policies = files.read_file("policies.md")
         decision: PolicyDecision = structured(self.llm, PolicyDecision).invoke(
             prompts.GUARD.format(
-                policies=policies, goal=self.run.goal, facts=self.run.facts_text(),
+                today=self.today, policies=policies, goal=self.run.goal,
+                facts=self.run.facts_text(),
                 changes="\n".join(f"- {c}" for c in self.run.changes) or "(none yet)",
-                documents=self._documents_for_guard(),
+                documents=self._documents_for_guard(form),
                 button=button, url=self.browser.page.url, form=form,
                 page=self.browser.page.inner_text("body")[:1500],
             )
@@ -348,10 +350,16 @@ class Worker:
         return {"messages": out, "consecutive_failures": consecutive,
                 "recent_failures": failures, "phase": phase, "claim": claim}
 
-    def _documents_for_guard(self) -> str:
-        """Source documents read in this run (policies excluded; the guard gets those anyway)."""
-        docs = [(p, t) for p, t in self.run.documents.items() if "polic" not in p]
-        return "\n\n".join(f"--- {p} ---\n{t[:1500]}" for p, t in docs[-8:]) or "(none)"
+    def _documents_for_guard(self, form: str) -> str:
+        """Documents read in this run that are the source of THIS record: ones containing an
+        identifier-like value from the form or page (e.g. an invoice or reference number).
+        Comparing against an unrelated document would produce false blocks."""
+        page = self.browser.page.inner_text("body") if self.browser.page else ""
+        idents = {tok for tok in re.findall(r"\b[A-Z]{2,}[A-Z0-9]*-[A-Z0-9-]+\b", form + page)}
+        docs = [(p, t) for p, t in self.run.documents.items()
+                if "polic" not in p and any(i in t for i in idents)]
+        return ("\n\n".join(f"--- {p} ---\n{t[:1500]}" for p, t in docs[-3:])
+                or "(no source document for this record was read in this run)")
 
     def _record_change(self, button: str, form: str) -> None:
         """Every data-changing action is remembered automatically, so neither the worker nor

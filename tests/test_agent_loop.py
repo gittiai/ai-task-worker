@@ -136,3 +136,17 @@ def test_finish_refused_while_items_open(monkeypatch, tmp_path):
                and not e["ok"]]
     assert refused and "b.pdf" in refused[0]["result"]
     assert result["status"] == "completed"
+
+
+def test_guard_only_sees_documents_for_the_same_record(monkeypatch, tmp_path):
+    run, w = make(monkeypatch, tmp_path, [])
+
+    class FakePage:
+        def inner_text(self, _):
+            return "Invoice INI-4471 Initech Pvt Ltd"
+
+    w.browser.page = FakePage()
+    run.documents = {"inbox/initech_invoice_sept.pdf": "Initech Invoice No: INI-4512 ...",
+                     "inbox/old.pdf": "Initech Invoice No: INI-4471 total 7,400"}
+    docs = w._documents_for_guard("Change status: flagged")
+    assert "old.pdf" in docs and "initech_invoice_sept" not in docs

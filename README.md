@@ -19,12 +19,12 @@ screenshots).
 
 ## Quick start
 
-Needs Python 3.12+, [uv](https://docs.astral.sh/uv/) and a [Groq API key](https://console.groq.com) (free tier works).
+Needs Python 3.12+, [uv](https://docs.astral.sh/uv/) and an API key for any OpenAI-compatible endpoint (or Groq).
 
 ```bash
 uv sync
 uv run playwright install chromium
-cp .env.example .env            # then put your GROQ_API_KEY in .env
+cp .env.example .env            # then set LLM_PROVIDER, LLM_MODEL and the key in .env
 
 # Terminal 1: the demo company's internal system (add CHAOS_MODE=1 to test recovery)
 uv run uvicorn company_app.main:app --port 8765
@@ -47,6 +47,20 @@ Set `HEADLESS=0` in `.env` to watch the browser. Run the tests (no API key neede
 | Process every invoice in the inbox that isn't in Acme Ops yet. | Multi-item work; the duplicate is refused; approval for the ₹1,24,000 invoice; computes "Net 30"; asks about the invoice with no due date |
 | Flag all overdue open invoices in Acme Ops. | A different task with **no code changes** |
 | Any of the above with `CHAOS_MODE=1` | Recovers from a blocking popup, randomised element IDs and a transient 503 |
+
+### Results from real runs (chaos mode on)
+
+| Task | Result | What happened |
+|---|---|---|
+| Latest Stark Logistics invoice | ✅ verified, 32 steps, ~2 min | Closed the popup; the policy guard blocked a save missing the source file in Notes; recovered from the 503; verifier re-opened record #4 against the PDF |
+| Process the whole inbox (7 PDFs) | ✅ verified, 107 steps, ~6 min | 5 recorded, 1 duplicate refused, 1 escalated (no due date → asked, skipped). Guard **blocked 6 saves with wrong values** taken from memory instead of the document; approval requested for ₹1,24,000 |
+| Flag overdue open invoices | ✅ verified, 23 steps | Same code, different task: flagged exactly the 3 overdue open invoices |
+
+Earlier failing runs drove most of the design. The verifier caught a worker claiming success
+with invented values (fix: documents never trimmed, guard compares against the source); the
+worker silently dropped items (fix: code-enforced work list); and the guard blocked a valid
+change by comparing against the wrong document (fix: match documents by identifier). Each
+run's full trace is in `runs/<id>/trace.jsonl`.
 
 ---
 
@@ -128,6 +142,11 @@ worker needs later (extracted values, record IDs, decisions) it saves with `note
 system prompt re-injects those facts with the current plan every turn. The memory is
 small, inspectable, and appears in the report.
 
+**5b. Multi-item work is tracked in code.** For tasks with several items the worker
+registers a work list; each item must be closed as done / already_exists / skipped /
+needs_human with evidence, and `finish` is refused while any item is open. This stops the
+most common long-task failure: quietly dropping items and reporting success.
+
 **6. Generalisation comes from the company's documents, not the code.** Rules like "amounts
 without separators", "dates as YYYY-MM-DD", "approval above ₹50,000" and "compute Net 30"
 are in `company_data/policies.md`, not in the prompts. A different task (flagging overdue
@@ -144,7 +163,7 @@ None of the agent's behaviour is mocked.
 
 | | |
 |---|---|
-| LLM | **GPT-OSS-120B** (open weights) served by **Groq** via `langchain-groq`; set by `GROQ_MODEL` |
+| LLM | Pluggable via `LLM_PROVIDER` / `LLM_MODEL`: any **OpenAI-compatible** endpoint (`langchain-openai`) or **Groq** (`langchain-groq`). Test runs below used `free/gpt-6-luna` through the APINEX gateway; earlier runs used GPT-OSS-120B on Groq. |
 | Agent loop | **LangGraph** (state machine) + `langchain-core` (tool schemas, structured output) |
 | Computer use | **Playwright** (Chromium) |
 | Documents | **pdfplumber** (extraction), **reportlab** (generating the sample invoices) |
@@ -166,6 +185,10 @@ No other external services. Everything except the LLM call runs locally.
   would use a secrets vault and scoped service accounts.
 
 ## Known limitations
+
+- **Smaller models still guess values.** With a free model, the worker sometimes types an
+  amount or date from memory. The policy guard catches these against the source document,
+  but that costs steps, and free-text fields (like Notes) are only loosely checked.
 
 - **Single browser tab, web only.** No desktop-app control, file downloads or multi-tab flows yet.
 - **Commit detection is label-based.** It catches buttons named save/submit/delete etc. A
