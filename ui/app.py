@@ -5,7 +5,6 @@ Run: uv run streamlit run ui/app.py
 
 import sys
 import threading
-import time
 import urllib.request
 from pathlib import Path
 
@@ -51,29 +50,36 @@ if st.button("▶ Run", type="primary", disabled=running):
     state.thread.start()
     running = True
 
-run: RunContext | None = state.get("run")
-if run:
+# The live view refreshes itself every second as a fragment, so Streamlit replaces its
+# contents cleanly (a full-page rerun loop left stale widgets on screen). Widgets for a
+# question keep stable keys, so a refresh doesn't disturb a click or half-typed answer.
+@st.fragment(run_every=1.0)
+def live_view() -> None:
+    run: RunContext | None = st.session_state.get("run")
+    if not run:
+        return
     human: QueueHuman = state.human
     if human.pending:
         p = human.pending
+        qid = sum(e["type"] in {"approval_request", "human_question"} for e in run.events)
         box = st.warning if p["kind"] == "approval" else st.info
         box(("🛡 **Approval needed**\n\n" if p["kind"] == "approval" else "❓ **Question**\n\n")
             + p["question"])
         if p["kind"] == "approval":
             c1, c2, c3 = st.columns([1, 1, 3])
-            comment = c3.text_input("Comment (optional)", key=f"c{len(run.events)}")
-            if c1.button("Approve", type="primary"):
+            comment = c3.text_input("Comment (optional)", key=f"comment{qid}")
+            if c1.button("Approve", type="primary", key=f"approve{qid}"):
                 human.answer(f"approve {comment}".strip())
-                st.rerun()
-            if c2.button("Reject"):
+                st.rerun(scope="fragment")
+            if c2.button("Reject", key=f"reject{qid}"):
                 human.answer(f"reject {comment}".strip())
-                st.rerun()
+                st.rerun(scope="fragment")
         else:
-            with st.form(f"answer{len(run.events)}"):
+            with st.form(f"answer{qid}"):
                 ans = st.text_input("Your answer")
                 if st.form_submit_button("Send"):
                     human.answer(ans)
-                    st.rerun()
+                    st.rerun(scope="fragment")
 
     left, right = st.columns([3, 2])
     with left:
@@ -124,8 +130,5 @@ if run:
             st.markdown(report.read_text())
         st.caption(f"Evidence folder: {run.dir}")
 
-# Keep refreshing while the worker runs, but not while it waits for a person: a rerun would
-# rebuild the Approve/answer widgets under the user's cursor.
-if running and not (run and state.human.pending):
-    time.sleep(1)
-    st.rerun()
+
+live_view()
