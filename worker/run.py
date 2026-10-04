@@ -46,6 +46,8 @@ class QueueHuman(HumanChannel):
         return answer
 
     def answer(self, text: str) -> None:
+        # Clear first, so a UI redraw right after the click no longer shows the old question.
+        self.pending = None
         self._answers.put(text)
 
 
