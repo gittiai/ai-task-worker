@@ -124,6 +124,8 @@ if run:
             st.markdown(report.read_text())
         st.caption(f"Evidence folder: {run.dir}")
 
-if running:
+# Keep refreshing while the worker runs, but not while it waits for a person: a rerun would
+# rebuild the Approve/answer widgets under the user's cursor.
+if running and not (run and state.human.pending):
     time.sleep(1)
     st.rerun()
